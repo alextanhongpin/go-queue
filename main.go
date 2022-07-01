@@ -2,82 +2,72 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
+	"github.com/alextanhongpin/go-queue/background"
 	"github.com/hibiken/asynq"
 )
 
-const (
-	redisAddr = "127.0.0.1:6379"
+func main() {
+	bg := background.New()
+	defer bg.Close()
 
-	TypeEmailDelivery = "email:deliver"
-)
+	usecase := NewEmailUsecase(bg)
 
-type EmailDeliveryPayload struct {
-	UserID     int
-	TemplateID string
-}
-
-func NewEmailDeliveryTask(userID int, tmplID string) (*asynq.Task, error) {
-	payload, err := json.Marshal(EmailDeliveryPayload{
-		UserID:     userID,
-		TemplateID: tmplID,
-	})
-	if err != nil {
-		return nil, err
+	// Register a task based on the request name.
+	if err := background.RegisterTask(bg, DeliverEmailRequest{}, usecase.DeliverEmail); err != nil {
+		log.Fatalf("failed to register task: %v", err)
 	}
 
-	return asynq.NewTask(TypeEmailDelivery, payload, asynq.ProcessIn(10*time.Second)), nil
-}
+	ctx := context.Background()
 
-func HandleEmailDeliveryTask(ctx context.Context, t *asynq.Task) error {
-	var p EmailDeliveryPayload
-	if err := json.Unmarshal(t.Payload(), &p); err != nil {
-		return fmt.Errorf("json.Unmarshal failed: %v: %w", err, asynq.SkipRetry)
+	// This will send the email immediately.
+	if err := usecase.DeliverEmail(ctx, DeliverEmailRequest{
+		Email:    "john.appleseed@mail.com",
+		Template: "send immediately",
+	}); err != nil {
+		log.Fatalf("failed to deliver email: %v", err)
 	}
 
-	log.Printf("Sending email to user: %+v", p)
+	// This will call the `DeliverEmail` in the background.
+	// Both operations calls the usecase `DeliverEmail`.
+	if err := usecase.DeliverEmailBackground(ctx, DeliverEmailRequest{
+		Email:    "john.appleseed@mail.com",
+		Template: "send in background",
+	}); err != nil {
+		log.Fatalf("failed to deliver email in background: %v", err)
+	}
+
+	if err := bg.Start(); err != nil {
+		log.Fatalf("failed to start server: %s", err)
+	}
+}
+
+type EmailUsecase struct {
+	bg *background.Background
+}
+
+func NewEmailUsecase(bg *background.Background) *EmailUsecase {
+	return &EmailUsecase{
+		bg: bg,
+	}
+}
+
+type DeliverEmailRequest struct {
+	Email    string
+	Template string
+}
+
+// DeliverEmail sends a template to the recipient.
+func (uc *EmailUsecase) DeliverEmail(ctx context.Context, req DeliverEmailRequest) error {
+	fmt.Printf("delivering email: %+v", req)
 
 	return nil
 }
 
-func main() {
-	client := asynq.NewClient(
-		asynq.RedisClientOpt{Addr: redisAddr},
-	)
-	defer client.Close()
-
-	task, err := NewEmailDeliveryTask(42, "some:template:id")
-	if err != nil {
-		log.Fatalf("failed to create task: %v", err)
-	}
-
-	info, err := client.Enqueue(task)
-	if err != nil {
-		log.Fatalf("failed to enqueue task: %v", err)
-	}
-
-	log.Printf("enqueued task: id=%s queue=%s", info.ID, info.Queue)
-
-	srv := asynq.NewServer(
-		asynq.RedisClientOpt{Addr: redisAddr},
-		asynq.Config{
-			Concurrency: 10,
-			Queues: map[string]int{
-				"critical": 6,
-				"default":  3,
-				"low":      1,
-			},
-		},
-	)
-
-	mux := asynq.NewServeMux()
-	mux.HandleFunc(TypeEmailDelivery, HandleEmailDeliveryTask)
-
-	if err := srv.Run(mux); err != nil {
-		log.Fatalf("failed to run server: %v", err)
-	}
+// DeliverEmailBackground will call the `DeliverEmail` method in the background.
+func (uc *EmailUsecase) DeliverEmailBackground(ctx context.Context, req DeliverEmailRequest) error {
+	return uc.bg.Enqueue(req, asynq.ProcessIn(10*time.Second))
 }
