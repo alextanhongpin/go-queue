@@ -17,7 +17,7 @@ func main() {
 	usecase := NewEmailUsecase(bg)
 
 	// Register a task based on the request name.
-	if err := background.RegisterTask(bg, DeliverEmailRequest{}, usecase.DeliverEmail); err != nil {
+	if err := background.RegisterTask(bg, usecase.DeliverEmail); err != nil {
 		log.Fatalf("failed to register task: %v", err)
 	}
 
@@ -62,7 +62,7 @@ type DeliverEmailRequest struct {
 
 // DeliverEmail sends a template to the recipient.
 func (uc *EmailUsecase) DeliverEmail(ctx context.Context, req DeliverEmailRequest) error {
-	fmt.Printf("delivering email: %+v", req)
+	fmt.Printf("delivering email: %+v\n", req)
 
 	return nil
 }

@@ -107,7 +107,8 @@ func (bg *Background) Start() error {
 
 // RegisterTask registers a task with the task name based on the request struct
 // name. Automatically handles unmarshaling of payload too.
-func RegisterTask[T any](bg *Background, t T, handler func(ctx context.Context, req T) error) error {
+func RegisterTask[T any](bg *Background, handler func(ctx context.Context, req T) error) error {
+	var t T
 	name := GetTypeName(t)
 
 	task := func(ctx context.Context, task *asynq.Task) error {
