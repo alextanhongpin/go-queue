@@ -11,6 +11,10 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+type backgroundManager interface {
+	RegisterTask(name string, handler TaskHandler) error
+}
+
 var (
 	ErrDuplicateTask = errors.New("background: duplicate task")
 	ErrTaskNotFound  = errors.New("background: task not found")
@@ -105,13 +109,8 @@ func (bg *Background) Start() error {
 	return bg.server.Run(mux)
 }
 
-// RegisterTask registers a task with the task name based on the request struct
-// name. Automatically handles unmarshaling of payload too.
-func RegisterTask[T any](bg *Background, handler func(ctx context.Context, req T) error) error {
-	var t T
-	name := GetTypeName(t)
-
-	task := func(ctx context.Context, task *asynq.Task) error {
+func HandleFunc[T any](handler func(ctx context.Context, req T) error) TaskHandler {
+	return func(ctx context.Context, task *asynq.Task) error {
 		var t T
 		if err := json.Unmarshal(task.Payload(), &t); err != nil {
 
@@ -120,8 +119,15 @@ func RegisterTask[T any](bg *Background, handler func(ctx context.Context, req T
 
 		return handler(ctx, t)
 	}
+}
 
-	return bg.RegisterTask(name, task)
+// RegisterTask registers a task with the task name based on the request struct
+// name. Automatically handles unmarshaling of payload too.
+func RegisterTask[T any](bg backgroundManager, handler func(ctx context.Context, req T) error) error {
+	var t T
+	name := GetTypeName(t)
+
+	return bg.RegisterTask(name, HandleFunc(handler))
 }
 
 func GetTypeName[T any](unk T) string {
